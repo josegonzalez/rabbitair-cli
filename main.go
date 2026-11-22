@@ -39,7 +39,8 @@ host may be an IP address or a device ID from "discover".
 Saved tokens are kept in the OS keychain, or in the config file under
 $XDG_CONFIG_HOME/rabbitair-cli when no keychain is usable.
 
-Run "rabbitair-cli <command> -h" for command flags.
+Run "rabbitair-cli <command> -h" for command flags, or
+"rabbitair-cli version" for the version.
 `
 
 func main() {
@@ -79,6 +80,8 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 		return cmdConfig(ctx, args[1:], out)
 	case "setup":
 		return cmdSetup(ctx, args[1:], out)
+	case "version", "--version":
+		return cmdVersion(out)
 	case "-h", "--help", "help":
 		fmt.Fprint(out, usage)
 		return nil

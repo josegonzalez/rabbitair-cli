@@ -6,9 +6,28 @@ It speaks the same local UDP protocol (port 9009) as the [python-rabbitair](http
 
 ## Install
 
+Download the binary for your system from the [latest release](https://github.com/josegonzalez/rabbitair-cli/releases/latest). Binaries are built for Linux, macOS and Windows on amd64 and arm64, and have no dependencies. On Linux and macOS, make the download executable:
+
+```shell
+chmod +x rabbitair-cli_*_darwin_arm64
+mv rabbitair-cli_*_darwin_arm64 /usr/local/bin/rabbitair-cli
+```
+
+macOS may refuse to open a downloaded binary that is not notarized. Clear the quarantine flag with `xattr -d com.apple.quarantine /usr/local/bin/rabbitair-cli`.
+
+Each release lists SHA-256 checksums, and the binaries have signed build provenance, which you can check with the GitHub CLI:
+
+```shell
+gh attestation verify rabbitair-cli_*_darwin_arm64 --repo josegonzalez/rabbitair-cli
+```
+
+Or build it with Go:
+
 ```shell
 go install github.com/josegonzalez/rabbitair-cli@latest
 ```
+
+`rabbitair-cli version` prints the installed version.
 
 ## Getting an access token
 
@@ -121,6 +140,16 @@ defer c.Close()
 
 state, err := c.GetState(ctx)
 ```
+
+## Releasing
+
+Releases are made by the "Release" workflow. In the Actions tab, open "Release", click "Run workflow" on `main` and pick `patch`, `minor` or `major`, or run:
+
+```shell
+gh workflow run release.yml --ref main -f bump=patch
+```
+
+The workflow checks formatting, runs `go vet` and the tests, and bumps the latest `v*` tag (`v0.0.0` when there is none). It then builds static binaries with `CGO_ENABLED=0` for each platform, attests their build provenance, and creates the tag and a GitHub release with the binaries and a checksum file.
 
 ## License
 

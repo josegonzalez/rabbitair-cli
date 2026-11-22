@@ -1,0 +1,188 @@
+name: Release
+
+# Run this from the Actions tab ("Run workflow" on main) and pick patch, minor
+# or major. The workflow tests the code, computes the next version from the
+# latest v* tag, cross-compiles static binaries (CGO_ENABLED=0) for Linux,
+# macOS and Windows on amd64 and arm64, and publishes them in a GitHub release
+# tagged with the new version, together with SHA-256 checksums and signed
+# build provenance.
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Which part of the version to bump
+        type: choice
+        required: true
+        options:
+          - patch
+          - minor
+          - major
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  test:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Check formatting
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "::error::not gofmt-formatted: $unformatted"
+            exit 1
+          fi
+
+      - run: go vet ./...
+
+      - run: go test ./...
+
+  version:
+    needs: test
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.next.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Compute the next version
+        id: next
+        env:
+          BUMP: ${{ inputs.bump }}
+        run: |
+          latest="$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1 || true)"
+          current="${latest:-v0.0.0}"
+          IFS=. read -r major minor patch <<< "${current#v}"
+          case "$BUMP" in
+            major) major=$((major + 1)); minor=0; patch=0 ;;
+            minor) minor=$((minor + 1)); patch=0 ;;
+            patch) patch=$((patch + 1)) ;;
+            *) echo "::error::unknown bump $BUMP"; exit 1 ;;
+          esac
+          version="$major.$minor.$patch"
+          if git rev-parse -q --verify "refs/tags/v$version" > /dev/null; then
+            echo "::error::tag v$version already exists"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Releasing ${latest:-(no previous release)} → v$version ($BUMP)" >> "$GITHUB_STEP_SUMMARY"
+
+  build:
+    needs: version
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        goos: [linux, darwin, windows]
+        goarch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Build
+        id: build
+        env:
+          CGO_ENABLED: "0"
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          ext=""
+          if [ "$GOOS" = "windows" ]; then
+            ext=".exe"
+          fi
+          name="rabbitair-cli_${VERSION}_${GOOS}_${GOARCH}${ext}"
+          mkdir -p dist
+          go build -trimpath -ldflags "-s -w -X main.version=v$VERSION" -o "dist/$name" .
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+
+      - name: Check the Linux amd64 binary runs
+        if: matrix.goos == 'linux' && matrix.goarch == 'amd64'
+        env:
+          NAME: ${{ steps.build.outputs.name }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          output="$("./dist/$NAME" version)"
+          echo "$output"
+          case "$output" in
+            "rabbitair-cli v$VERSION "*) ;;
+            *) echo "::error::unexpected version output: $output"; exit 1 ;;
+          esac
+          if ldd "./dist/$NAME" > /dev/null 2>&1; then
+            echo "::error::binary is dynamically linked"
+            exit 1
+          fi
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: binary-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/${{ steps.build.outputs.name }}
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    needs: [version, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: binary-*
+          path: dist
+          merge-multiple: true
+
+      - name: Write checksums
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        working-directory: dist
+        run: |
+          binaries=(rabbitair-cli_"${VERSION}"_*_*)
+          if [ "${#binaries[@]}" -ne 6 ]; then
+            echo "::error::expected 6 binaries, found ${#binaries[@]}: ${binaries[*]}"
+            exit 1
+          fi
+          sha256sum "${binaries[@]}" > "rabbitair-cli_${VERSION}_checksums.txt"
+          cat "rabbitair-cli_${VERSION}_checksums.txt"
+
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/rabbitair-cli_*
+
+      - name: Create the tag and GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          gh release create "v$VERSION" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "v$VERSION" \
+            --generate-notes
