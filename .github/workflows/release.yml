@@ -1,11 +1,11 @@
 name: Release
 
 # Run this from the Actions tab ("Run workflow" on main) and pick patch, minor
-# or major. The workflow tests the code, computes the next version from the
-# latest v* tag, cross-compiles static binaries (CGO_ENABLED=0) for Linux,
-# macOS and Windows on amd64 and arm64, and publishes them in a GitHub release
-# tagged with the new version, together with SHA-256 checksums and signed
-# build provenance.
+# or major. The workflow runs CI on Linux, macOS and Windows, computes the
+# next version from the latest v* tag, cross-compiles static binaries
+# (CGO_ENABLED=0) for Linux, macOS and Windows on amd64 and arm64, and
+# publishes them in a GitHub release tagged with the new version, together
+# with SHA-256 checksums and signed build provenance.
 
 on:
   workflow_dispatch:
@@ -27,33 +27,12 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  test:
+  ci:
     if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
-        with:
-          go-version-file: go.mod
-          cache: false
-
-      - name: Check formatting
-        run: |
-          unformatted="$(gofmt -l .)"
-          if [ -n "$unformatted" ]; then
-            echo "::error::not gofmt-formatted: $unformatted"
-            exit 1
-          fi
-
-      - run: go vet ./...
-
-      - run: go test ./...
+    uses: ./.github/workflows/ci.yml
 
   version:
-    needs: test
+    needs: ci
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.next.outputs.version }}

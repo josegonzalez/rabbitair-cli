@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 
@@ -65,7 +66,9 @@ func Load() (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	if info.Mode().Perm()&0o077 != 0 {
+	// Windows does not have Unix permissions and reports every file as
+	// readable by everyone, so the check only applies elsewhere.
+	if runtime.GOOS != "windows" && info.Mode().Perm()&0o077 != 0 {
 		fmt.Fprintf(os.Stderr, "warning: %s is accessible by other users; run: chmod 600 %s\n", path, path)
 	}
 	if _, err := toml.DecodeFile(path, c); err != nil {

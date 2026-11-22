@@ -149,7 +149,7 @@ Releases are made by the "Release" workflow. In the Actions tab, open "Release",
 gh workflow run release.yml --ref main -f bump=patch
 ```
 
-The workflow checks formatting, runs `go vet` and the tests, and bumps the latest `v*` tag (`v0.0.0` when there is none). It then builds static binaries with `CGO_ENABLED=0` for each platform, attests their build provenance, and creates the tag and a GitHub release with the binaries and a checksum file.
+The workflow runs CI (the formatting check, `go vet`, and the tests on Linux, macOS and Windows), and bumps the latest `v*` tag (`v0.0.0` when there is none). It then builds static binaries with `CGO_ENABLED=0` for each platform, attests their build provenance, and creates the tag and a GitHub release with the binaries and a checksum file.
 
 ## License
 
